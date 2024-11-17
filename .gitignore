@@ -1,0 +1,21 @@
+# Exclure l'environnement virtuel
+venv/
+
+# Exclure les fichiers de configuration de PyCharm
+.idea/
+
+# Exclure les fichiers temporaires Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Exclure les fichiers de logs
+*.log
+*.tmp
+
+# Exclure les fichiers de sortie (comme les fichiers .pkl pour Q-tables)
+*.pkl
+
+# Exclure les fichiers de cache Pillow
+.cache/
