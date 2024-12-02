@@ -159,8 +159,9 @@ class Environment:
             return snake.body[0], REWARD_OUT
 
         if new_head in self.bomb_positions:
-            print(f"Bomb hit! Position: {new_head}, Malus: {REWARD_BOMB}")
-            return new_head, REWARD_BOMB
+            print(f"Bomb hit! Position: {new_head}. Snake loses 50% of its body.")
+            snake.reduce_body(0.5)
+            return new_head, REWARD_OUT
 
         reward = 0
         if new_head in self.food_positions:
@@ -193,6 +194,10 @@ class Snake:
             self.grow = False
         else:
             self.body = [new_head] + self.body[:-1]
+    def reduce_body(self, percentage):
+        if len(self.body) > 1:
+            segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
+            self.body = self.body[:segments_to_keep]
 
 class SnakeGame(arcade.Window):
     def __init__(self, width, height, snake, env, agent):
@@ -349,10 +354,12 @@ class SnakeGame(arcade.Window):
         elif self.snake_direction == ACTION_RIGHT:
             self.snake_head_sprite.angle = 90
 
-        if len(self.snake.body) > len(self.snake_sprites):
-            for _ in range(len(self.snake.body) - len(self.snake_sprites)):
-                sprite = arcade.Sprite(":resources:images/topdown_tanks/treeGreen_large.png", SPRITE_SIZE / 128)
-                self.snake_sprites.append(sprite)
+        while len(self.snake_sprites) > len(self.snake.body) - 1:
+            self.snake_sprites.pop().kill()
+
+        while len(self.snake_sprites) < len(self.snake.body) - 1:
+            sprite = arcade.Sprite(":resources:images/topdown_tanks/treeGreen_large.png", SPRITE_SIZE / 128)
+            self.snake_sprites.append(sprite)
 
         for i, segment in enumerate(self.snake.body[1:]):
             self.snake_sprites[i].center_x = (segment[1] + 0.5) * SPRITE_SIZE
