@@ -21,6 +21,7 @@ REWARD_SURVIVAL = 10
 REWARD_NEAR_FOOD = 50
 REWARD_AWAY_FOOD = -30
 REWARD_OUT = -200
+REWARD_BOMB = -250
 
 ACTION_UP = 'U'
 ACTION_DOWN = 'D'
@@ -93,6 +94,7 @@ class Environment:
         self.width = len(self.map[0])
         self.walls = self.create_walls()
         self.food_positions = self.place_food(30)
+        self.bomb_positions = self.place_bombs(10)
 
     def create_walls(self):
         walls = []
@@ -117,6 +119,19 @@ class Environment:
                 empty_spaces.remove(pos)
         return positions
 
+    def place_bombs(self, num_bombs):
+        positions = []
+        empty_spaces = [
+            (row_idx, col_idx)
+            for row_idx, row in enumerate(self.map)
+            for col_idx, cell in enumerate(row)
+            if cell == '.' and (row_idx, col_idx) not in self.food_positions
+        ]
+        while len(positions) < num_bombs and empty_spaces:
+            pos = random.choice(empty_spaces)
+            positions.append(pos)
+            empty_spaces.remove(pos)
+        return positions
     def get_radar(self, head):
         if not isinstance(head, tuple) or len(head) != 2:
             raise ValueError(f"Invalid head position: {head}")
@@ -136,13 +151,16 @@ class Environment:
         }
         return {**radar, **food_distances}
 
-
     def move(self, snake, action):
         move = MOVES[action]
         new_head = (snake.body[0][0] + move[0], snake.body[0][1] + move[1])
 
         if new_head in self.walls:
             return snake.body[0], REWARD_OUT
+
+        if new_head in self.bomb_positions:
+            print(f"Bomb hit! Position: {new_head}, Malus: {REWARD_BOMB}")
+            return new_head, REWARD_BOMB
 
         reward = 0
         if new_head in self.food_positions:
@@ -192,7 +210,7 @@ class SnakeGame(arcade.Window):
         self.snake_head_sprite = arcade.Sprite("assets/snake_head.png", scale=1)
 
         self.time_since_last_move = 0
-        self.snake_move_interval = 0.001
+        self.snake_move_interval = 0.1
         self.snake_direction = ACTION_RIGHT
         self.pending_direction = self.snake_direction
 
@@ -259,10 +277,18 @@ class SnakeGame(arcade.Window):
             sprite.center_y = (self.env.height - food[0] - 1) * SPRITE_SIZE + SPRITE_SIZE // 2
             self.food_sprites.append(sprite)
 
+        self.bomb_sprites = arcade.SpriteList()
+        for bomb in self.env.bomb_positions:
+            sprite = arcade.Sprite(":resources:images/tiles/bomb.png", SPRITE_SIZE / 128)
+            sprite.center_x = bomb[1] * SPRITE_SIZE + SPRITE_SIZE // 2
+            sprite.center_y = (self.env.height - bomb[0] - 1) * SPRITE_SIZE + SPRITE_SIZE // 2
+            self.bomb_sprites.append(sprite)
+
     def on_draw(self):
         arcade.start_render()
         self.wall_sprites.draw()
         self.food_sprites.draw()
+        self.bomb_sprites.draw()
         self.snake_sprites.draw()
         self.snake_head_sprite.draw()
 
