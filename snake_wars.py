@@ -9,6 +9,8 @@ screen_width, screen_height = arcade.get_display_size()
 MAP_WIDTH = screen_width // SPRITE_SIZE
 MAP_HEIGHT = screen_height // SPRITE_SIZE
 
+#MAP_WIDTH = 20
+#MAP_HEIGHT = 20
 def generate_map(width, height):
     map_data = ["x" * width]
     for _ in range(height - 2):
@@ -16,12 +18,9 @@ def generate_map(width, height):
     map_data.append("x" * width)
     return "\n".join(map_data)
 
-REWARD_FOOD = 50
-REWARD_SURVIVAL = 10
-REWARD_NEAR_FOOD = 50
-REWARD_AWAY_FOOD = -30
-REWARD_OUT = -200
-REWARD_BOMB = -250
+REWARD_FOOD = 200
+REWARD_SURVIVAL = 1
+REWARD_BOMB = -500
 
 ACTION_UP = 'U'
 ACTION_DOWN = 'D'
@@ -44,39 +43,29 @@ def arg_max(table):
     return max(table, key=table.get)
 
 class QTable:
-    def __init__(self, learning_rate=0.1, discount_factor=0.95, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.99):
+    def __init__(self, learning_rate=1, discount_factor=0.9):
         self.table = {}
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
-        self.epsilon = epsilon
-        self.epsilon_min = epsilon_min
-        self.epsilon_decay = epsilon_decay
 
-    def reduce_epsilon(self):
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
     def set(self, state, action, reward, new_state):
         state = tuple(state)
         new_state = tuple(new_state)
 
         if state not in self.table:
             self.table[state] = {action: 0 for action in ACTIONS}
-
         if new_state not in self.table:
             self.table[new_state] = {action: 0 for action in ACTIONS}
 
-        max_future_q = max(self.table[new_state].values())
-        current_q = self.table[state][action]
-        delta = reward + self.discount_factor * max(self.table[new_state].values()) - self.table[state][action]
-        self.table[state][action] += self.learning_rate * delta
+        max_future_q = max(self.table[new_state].values(), default=0)
+        self.table[state][action] += self.learning_rate * (reward + self.discount_factor * max_future_q - self.table[state][action])
 
-    def best_action(self, state):
-        state = tuple(state)
-        if state in self.table and self.table[state]:
-            if random.random() < self.epsilon:
-                return random.choice(ACTIONS)
-            return arg_max(self.table[state])
-        else:
+    def best_action(self, state, epsilon=0.9):
+        if random.random() < epsilon:
             return random.choice(ACTIONS)
+        if state in self.table and self.table[state]:
+            return arg_max(self.table[state])
+        return random.choice(ACTIONS)
 
     def save(self, filename):
         with open(filename, 'wb') as file:
@@ -132,61 +121,68 @@ class Environment:
             positions.append(pos)
             empty_spaces.remove(pos)
         return positions
+
     def get_radar(self, head):
-        if not isinstance(head, tuple) or len(head) != 2:
-            raise ValueError(f"Invalid head position: {head}")
-
-        radar = {
-            ACTION_UP: self.height - head[0],
-            ACTION_DOWN: head[0],
-            ACTION_LEFT: head[1],
-            ACTION_RIGHT: self.width - head[1]
+        directions = {
+            ACTION_UP: (-1, 0),
+            ACTION_DOWN: (1, 0),
+            ACTION_LEFT: (0, -1),
+            ACTION_RIGHT: (0, 1),
         }
 
-        food_distances = {
-            ACTION_UP: min([abs(food[0] - head[0]) for food in self.food_positions] or [self.height]),
-            ACTION_DOWN: min([abs(food[0] - head[0]) for food in self.food_positions] or [self.height]),
-            ACTION_LEFT: min([abs(food[1] - head[1]) for food in self.food_positions] or [self.width]),
-            ACTION_RIGHT: min([abs(food[1] - head[1]) for food in self.food_positions] or [self.width]),
-        }
-        return {**radar, **food_distances}
+        radar = {}
+        for action, (row_step, col_step) in directions.items():
+            x, y = head[0] + row_step, head[1] + col_step
+
+            if x < 0 or x >= self.height or y < 0 or y >= self.width:
+                radar[action] = 'WALL'  # La case est hors de la carte
+            elif (x, y) in self.walls:
+                radar[action] = 'WALL'  # Il y a un mur
+            elif (x, y) in self.food_positions:
+                radar[action] = 'FOOD'  # Il y a de la nourriture
+            elif (x, y) in self.bomb_positions:
+                radar[action] = 'BOMB'  # Il y a une bombe
+            else:
+                radar[action] = 'EMPTY'  # La case est vide
+
+        return radar
 
     def move(self, snake, action):
         move = MOVES[action]
         new_head = (snake.body[0][0] + move[0], snake.body[0][1] + move[1])
 
+        if new_head[0] < 0 or new_head[0] >= self.height or new_head[1] < 0 or new_head[1] >= self.width:
+            return snake.body[0], 0
+
         if new_head in self.walls:
-            return snake.body[0], REWARD_OUT
+            return snake.body[0], 0
 
         if new_head in self.bomb_positions:
-            print(f"Bomb hit! Position: {new_head}. Snake loses 50% of its body.")
             snake.reduce_body(0.5)
-            return new_head, REWARD_OUT
+            return new_head, REWARD_BOMB
 
-        reward = 0
+        reward = REWARD_SURVIVAL
+
         if new_head in self.food_positions:
             self.food_positions.remove(new_head)
             self.food_positions.append(self.place_food(1)[0])
             snake.grow = True
             reward += REWARD_FOOD
-        else:
-            closest_food = min(self.food_positions,
-                               key=lambda food: abs(food[0] - new_head[0]) + abs(food[1] - new_head[1]))
-            current_distance = abs(closest_food[0] - snake.body[0][0]) + abs(closest_food[1] - snake.body[0][1])
-            new_distance = abs(closest_food[0] - new_head[0]) + abs(closest_food[1] - new_head[1])
-
-            if new_distance < current_distance:
-                reward += 5
-            else:
-                reward -= 10
 
         return new_head, reward
 
-
 class Snake:
-    def __init__(self, start_position):
+    def __init__(self, start_position, qtable):
         self.body = [start_position]
         self.grow = False
+        self.qtable = qtable
+        self.total_reward = 0
+
+    def decide_action(self, state, epsilon=0.3):
+        return self.qtable.best_action(state, epsilon)
+
+    def update_qtable(self, state, action, reward, new_state):
+        self.qtable.set(state, action, reward, new_state)
 
     def move(self, new_head):
         if self.grow:
@@ -194,10 +190,12 @@ class Snake:
             self.grow = False
         else:
             self.body = [new_head] + self.body[:-1]
+
     def reduce_body(self, percentage):
         if len(self.body) > 1:
             segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
             self.body = self.body[:segments_to_keep]
+
 
 class SnakeGame(arcade.Window):
     def __init__(self, width, height, snake, env, agent):
@@ -215,43 +213,36 @@ class SnakeGame(arcade.Window):
         self.snake_head_sprite = arcade.Sprite("assets/snake_head.png", scale=1)
 
         self.time_since_last_move = 0
-        self.snake_move_interval = 0.1
+        self.snake_move_interval = 0.001
         self.snake_direction = ACTION_RIGHT
         self.pending_direction = self.snake_direction
 
         self.manual_control = False
-
     def do(self):
         head_position = self.snake.body[0]
         radar = self.env.get_radar(head_position)
 
         state = (
             head_position,
-            tuple(self.env.food_positions),
-            tuple(self.snake.body[1:]),
             tuple(radar.values())
         )
 
-        action = self.agent.best_action(state)
-
+        action = self.snake.decide_action(state)
         new_head, reward = self.env.move(self.snake, action)
 
         new_radar = self.env.get_radar(new_head)
         new_state = (
             new_head,
-            tuple(self.env.food_positions),
-            tuple(self.snake.body[1:]),
             tuple(new_radar.values())
         )
 
-        self.agent.set(state, action, reward, new_state)
-        self.agent.reduce_epsilon()
-
+        self.snake.update_qtable(state, action, reward, new_state)
         self.snake.move(new_head)
+        self.snake.total_reward += reward
+
         self.update_snake_position()
         self.update_food_positions()
 
-        self.total_reward += reward
     def on_key_press(self, key, modifiers):
         if key == arcade.key.F:
             self.close()
@@ -297,6 +288,8 @@ class SnakeGame(arcade.Window):
         self.snake_sprites.draw()
         self.snake_head_sprite.draw()
 
+        arcade.draw_text(f"Score: {self.total_reward}", 10, self.height - 30, arcade.color.WHITE, 20)
+
     def on_update(self, delta_time):
         self.time_since_last_move += delta_time
 
@@ -304,7 +297,6 @@ class SnakeGame(arcade.Window):
             self.time_since_last_move = 0
 
             head_position = self.snake.body[0]
-
             radar = self.env.get_radar(head_position)
 
             state = (
@@ -317,23 +309,29 @@ class SnakeGame(arcade.Window):
             if self.manual_control:
                 self.snake_direction = self.pending_direction
             else:
-                self.snake_direction = self.agent.best_action(state)
+                possible_actions = [
+                    action for action in ACTIONS
+                    if self.env.move(self.snake, action)[0] != head_position
+                ]
+                if possible_actions:
+                    self.snake_direction = self.agent.best_action(state)
+                else:
+                    self.snake_direction = random.choice(ACTIONS)
 
             new_head, reward = self.env.move(self.snake, self.snake_direction)
 
             if not isinstance(new_head, tuple) or len(new_head) != 2:
                 raise ValueError(f"Invalid new head position: {new_head}")
 
-            if not self.manual_control:
-                new_radar = self.env.get_radar(new_head)
-                new_state = (
-                    new_head,
-                    tuple(self.env.food_positions),
-                    tuple(self.snake.body[1:]),
-                    tuple(new_radar.values())
-                )
-                self.agent.set(state, self.snake_direction, reward, new_state)
-                self.agent.reduce_epsilon()
+            new_radar = self.env.get_radar(new_head)
+            new_state = (
+                new_head,
+                tuple(self.env.food_positions),
+                tuple(self.snake.body[1:]),
+                tuple(new_radar.values())
+            )
+
+            self.agent.set(state, self.snake_direction, reward, new_state)
 
             self.snake.move(new_head)
             self.update_snake_position()
@@ -376,17 +374,17 @@ if __name__ == "__main__":
     MAP = generate_map(MAP_WIDTH, MAP_HEIGHT)
     env = Environment(MAP)
 
-    snake = Snake((1, 1))
-    agent = QTable()
-
+    qtable = QTable()
     if os.path.exists(FILE_AGENT):
-        agent.load(FILE_AGENT)
+        qtable.load(FILE_AGENT)
 
-    game = SnakeGame(SPRITE_SIZE * MAP_WIDTH, SPRITE_SIZE * MAP_HEIGHT, snake, env, agent)
+    snake = Snake(start_position=(1, 1), qtable=qtable)
+
+    game = SnakeGame(SPRITE_SIZE * MAP_WIDTH, SPRITE_SIZE * MAP_HEIGHT, snake, env, qtable)
     game.setup()
     arcade.run()
 
-    agent.save(FILE_AGENT)
+    qtable.save(FILE_AGENT)
 
 
 
