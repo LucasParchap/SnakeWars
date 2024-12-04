@@ -26,14 +26,14 @@ window.config(bg="#34495e")
 maze_image = Image.open("assets/maze_bg.png")
 maze_image = maze_image.resize(
     (int(maze_image.width * 0.4), int(maze_image.height * 0.4)),
-    Image.ANTIALIAS
+    Image.Resampling.LANCZOS
 )
 maze_bg = ImageTk.PhotoImage(maze_image)
 
 snake_image = Image.open("assets/snake_bg.png")
 snake_image = snake_image.resize(
     (int(snake_image.width * 0.4), int(snake_image.height * 0.4)),
-    Image.ANTIALIAS
+    Image.Resampling.LANCZOS
 )
 snake_bg = ImageTk.PhotoImage(snake_image)
 

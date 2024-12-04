@@ -18,7 +18,7 @@ def generate_map(width, height):
     map_data.append("x" * width)
     return "\n".join(map_data)
 
-REWARD_FOOD = 200
+REWARD_FOOD = 50
 REWARD_SURVIVAL = 1
 REWARD_BOMB = -500
 
@@ -43,10 +43,16 @@ def arg_max(table):
     return max(table, key=table.get)
 
 class QTable:
-    def __init__(self, learning_rate=1, discount_factor=0.9):
+    def __init__(self, learning_rate=0.1, discount_factor=0.95, epsilon=1.0):
         self.table = {}
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
+        self.epsilon = epsilon
+
+    '''
+    def update_epsilon(self, decay_rate=0.995, min_epsilon=0.1):
+        self.epsilon = max(min_epsilon, self.epsilon * decay_rate)
+    '''
 
     def set(self, state, action, reward, new_state):
         state = tuple(state)
@@ -59,6 +65,8 @@ class QTable:
 
         max_future_q = max(self.table[new_state].values(), default=0)
         self.table[state][action] += self.learning_rate * (reward + self.discount_factor * max_future_q - self.table[state][action])
+
+        #print(f"QTable updated for state {state}: {self.table[state]}")
 
     def best_action(self, state, epsilon=0.9):
         if random.random() < epsilon:
@@ -122,6 +130,7 @@ class Environment:
             empty_spaces.remove(pos)
         return positions
 
+    #Affiché le radar à l'écran
     def get_radar(self, head):
         directions = {
             ACTION_UP: (-1, 0),
@@ -132,18 +141,24 @@ class Environment:
 
         radar = {}
         for action, (row_step, col_step) in directions.items():
-            x, y = head[0] + row_step, head[1] + col_step
+            x, y = head
 
-            if x < 0 or x >= self.height or y < 0 or y >= self.width:
-                radar[action] = 'WALL'  # La case est hors de la carte
-            elif (x, y) in self.walls:
-                radar[action] = 'WALL'  # Il y a un mur
-            elif (x, y) in self.food_positions:
-                radar[action] = 'FOOD'  # Il y a de la nourriture
-            elif (x, y) in self.bomb_positions:
-                radar[action] = 'BOMB'  # Il y a une bombe
+            while True:
+                x += row_step
+                y += col_step
+
+                if x < 0 or x >= self.height or y < 0 or y >= self.width:
+                    break
+                if (x, y) in self.walls:
+                    break
+                if (x, y) in self.food_positions:
+                    radar[action] = 'FOOD'
+                    break
+                if (x, y) in self.bomb_positions:
+                    radar[action] = 'BOMB'
+                    break
             else:
-                radar[action] = 'EMPTY'  # La case est vide
+                radar[action] = 'EMPTY'
 
         return radar
 
@@ -178,7 +193,7 @@ class Snake:
         self.qtable = qtable
         self.total_reward = 0
 
-    def decide_action(self, state, epsilon=0.3):
+    def decide_action(self, state, epsilon=0.1):
         return self.qtable.best_action(state, epsilon)
 
     def update_qtable(self, state, action, reward, new_state):
@@ -218,6 +233,8 @@ class SnakeGame(arcade.Window):
         self.pending_direction = self.snake_direction
 
         self.manual_control = False
+        self.save_counter = 0
+
     def do(self):
         head_position = self.snake.body[0]
         radar = self.env.get_radar(head_position)
@@ -248,6 +265,10 @@ class SnakeGame(arcade.Window):
             self.close()
         elif key == arcade.key.L:
             self.manual_control = not self.manual_control
+        elif key == arcade.key.O:
+            self.snake_move_interval = min(1.0, self.snake_move_interval * 2)
+        elif key == arcade.key.P:
+            self.snake_move_interval = max(0.001, self.snake_move_interval / 2)
         elif self.manual_control:
             if key == arcade.key.Z:
                 self.pending_direction = ACTION_UP
@@ -281,6 +302,7 @@ class SnakeGame(arcade.Window):
             self.bomb_sprites.append(sprite)
 
     def on_draw(self):
+
         arcade.start_render()
         self.wall_sprites.draw()
         self.food_sprites.draw()
@@ -332,6 +354,12 @@ class SnakeGame(arcade.Window):
             )
 
             self.agent.set(state, self.snake_direction, reward, new_state)
+
+            self.save_counter += 1
+            if self.save_counter >= 1000:
+                self.agent.save(FILE_AGENT)
+                print("QTable sauvegardée après 1000 coups.")
+                self.save_counter = 0
 
             self.snake.move(new_head)
             self.update_snake_position()
