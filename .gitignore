@@ -19,3 +19,9 @@ __pycache__/
 
 # Exclure les fichiers de cache Pillow
 .cache/
+
+cours
+
+mouse.qtable
+
+snake.qtable
