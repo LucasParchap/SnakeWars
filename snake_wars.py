@@ -51,10 +51,9 @@ class QTable:
         self.discount_factor = discount_factor
         self.epsilon = epsilon
 
-    '''
     def update_epsilon(self, decay_rate=0.995, min_epsilon=0.1):
         self.epsilon = max(min_epsilon, self.epsilon * decay_rate)
-    '''
+
 
     def set(self, state, action, reward, new_state):
         state = tuple(state)
@@ -67,6 +66,7 @@ class QTable:
 
         max_future_q = max(self.table[new_state].values(), default=0)
         self.table[state][action] += self.learning_rate * (reward + self.discount_factor * max_future_q - self.table[state][action])
+        #print(f"État : {state}, Action : {action}, Valeur Q mise à jour : {self.table[state][action]}")
 
 
     def best_action(self, state, epsilon=0.9):
@@ -317,34 +317,6 @@ class SnakeGame(arcade.Window):
 
         arcade.draw_text(f"Score: {self.total_reward}", 10, self.height - 30, arcade.color.WHITE, 20)
 
-    def end_episode(self):
-        try:
-            print(f"Début de end_episode. Score actuel : {self.current_episode_score}")
-            print(f"Taille des sprites avant réinitialisation : {len(self.wall_sprites)} murs, "
-                  f"{len(self.food_sprites)} aliments, {len(self.bomb_sprites)} bombes.")
-
-            self.episode_history.append(self.current_episode_score)
-            print(f"Score ajouté à l'historique. Historique actuel : {self.episode_history}")
-
-            self.current_episode_score = 0
-            self.snake.total_reward = 0
-            self.snake.body = [(1, 1)]
-            self.snake.grow = False
-
-            self.wall_sprites = arcade.SpriteList()
-            self.food_sprites = arcade.SpriteList()
-            self.bomb_sprites = arcade.SpriteList()
-
-            self.env = Environment(generate_map(MAP_WIDTH, MAP_HEIGHT))
-            print("Nouvelle carte générée et sprites réinitialisés.")
-
-            self.setup()
-            print(f"Setup terminé. Historique des scores : {self.episode_history}")
-
-        except Exception as e:
-            print(f"Erreur dans end_episode : {e}")
-            raise
-
     def on_update(self, delta_time):
         self.time_since_last_move += delta_time
 
@@ -460,6 +432,9 @@ class SnakeGame(arcade.Window):
 
             self.setup()
             print(f"Setup terminé. Historique des scores : {self.episode_history}")
+
+            self.agent.update_epsilon()
+            print(f"Valeur actuelle de epsilon : {self.agent.epsilon}")
 
         except Exception as e:
             print(f"Erreur dans end_episode : {e}")
