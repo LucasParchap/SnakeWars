@@ -1,20 +1,22 @@
-from random import choice
+from random import *
 import arcade
 import os
 import pickle
+import matplotlib.pyplot as plt
 
 MAZE = """
 ?..x....
 ....xxx.
 xxx.....
 ....x.xx
-..xxxxx.
+..xxx.x.
 ....x...
 ....x.x.
 ......x!
 """
 
 FILE_AGENT = 'mouse.qtable'
+
 TILE_WALL = 'x'
 
 ACTION_UP = 'U'
@@ -22,7 +24,6 @@ ACTION_DOWN = 'D'
 ACTION_LEFT = 'L'
 ACTION_RIGHT = 'R'
 ACTIONS = [ACTION_UP, ACTION_DOWN, ACTION_LEFT, ACTION_RIGHT]
-
 REWARD_OUT = -100
 REWARD_WALL = -100
 REWARD_GOAL = 1000
@@ -30,18 +31,18 @@ REWARD_DEFAULT = -1
 
 SPRITE_SIZE = 64
 
-MOVES = {
-    ACTION_UP: (-1, 0),
-    ACTION_DOWN: (1, 0),
-    ACTION_LEFT: (0, -1),
-    ACTION_RIGHT: (0, 1)
-}
+MOVES = {ACTION_UP: (-1, 0),
+         ACTION_DOWN: (1, 0),
+         ACTION_LEFT: (0, -1),
+         ACTION_RIGHT: (0, 1)}
+
 
 def arg_max(table):
     return max(table, key=table.get)
 
+
 class QTable:
-    def __init__(self, learning_rate=1, discount_factor=0.9):
+    def __init__(self, learning_rate=0.9, discount_factor=0.9):
         self.dic = {}
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
@@ -51,22 +52,18 @@ class QTable:
             self.dic[state] = {ACTION_UP: 0, ACTION_DOWN: 0, ACTION_LEFT: 0, ACTION_RIGHT: 0}
         if new_state not in self.dic:
             self.dic[new_state] = {ACTION_UP: 0, ACTION_DOWN: 0, ACTION_LEFT: 0, ACTION_RIGHT: 0}
+
+        self.dic[state][action] += reward
+
         delta = reward + self.discount_factor * max(self.dic[new_state].values()) - self.dic[state][action]
         self.dic[state][action] += self.learning_rate * delta
+        # Q(s, a) = Q(s, a) + alpha * [reward + gamma * max(S', a) - Q(s, a)]
 
     def best_action(self, position):
         if position in self.dic:
             return arg_max(self.dic[position])
         else:
             return choice(ACTIONS)
-
-    def save(self, filename):
-        with open(filename, 'wb') as file:
-            pickle.dump(self.dic, file)
-
-    def load(self, filename):
-        with open(filename, 'rb') as file:
-            self.dic = pickle.load(file)
 
     def __repr__(self):
         res = ' ' * 11
@@ -80,30 +77,54 @@ class QTable:
             res += '\r\n'
         return res
 
+
 class Agent:
     def __init__(self, env):
         self.env = env
+        self.history = []
+        self.score = None
         self.reset()
         self.qtable = QTable()
+        self.exploration = 0
 
     def reset(self):
+        if self.score:
+            self.history.append(self.score)
         self.position = env.start
         self.score = 0
+
+    def shake(self, exploration=1.0):
+        self.exploration = 1.0
+
+    def save(self, filename):
+        with open(filename, 'wb') as file:
+            pickle.dump((self.qtable.dic, self.history), file)
+
+    def load(self, filename):
+        with open(filename, 'rb') as file:
+            self.qtable.dic, self.history = pickle.load(file)
 
     def do(self, action=None):
         if not action:
             action = self.best_action()
+
         new_position, reward = self.env.move(self.position, action)
         self.qtable.set(self.position, action, reward, new_position)
         self.position = new_position
         self.score += reward
+
         return action, reward
 
     def best_action(self):
-        return self.qtable.best_action(self.position)
+        if random() < self.exploration:
+            self.exploration *= 0.999
+            return choice(ACTIONS)
+        else:
+            return self.qtable.best_action(self.position)
 
     def __repr__(self):
-        return f"{self.position} score:{self.score}"
+        return f"{self.position} score:{self.score} exploration:{self.exploration}"
+
 
 class Environment:
     def __init__(self, text):
@@ -122,6 +143,7 @@ class Environment:
     def move(self, position, action):
         move = MOVES[action]
         new_position = (position[0] + move[0], position[1] + move[1])
+
         if new_position not in self.maze:
             reward = REWARD_OUT
         elif self.maze[new_position] in [TILE_WALL]:
@@ -132,11 +154,13 @@ class Environment:
         else:
             reward = REWARD_DEFAULT
             position = new_position
+
         return position, reward
+
 
 class MazeWindow(arcade.Window):
     def __init__(self, agent):
-        super().__init__(SPRITE_SIZE * env.width, SPRITE_SIZE * env.height, "Maze")
+        super().__init__(SPRITE_SIZE * env.width, SPRITE_SIZE * env.height, "ESGI Maze")
         self.agent = agent
         self.env = agent.env
         arcade.set_background_color(arcade.color.AMAZON)
@@ -147,6 +171,7 @@ class MazeWindow(arcade.Window):
             if env.maze[state] is TILE_WALL:
                 sprite = self.create_sprite(':resources:images/tiles/boxCrate_double.png', state)
                 self.walls.append(sprite)
+
         self.goal = self.create_sprite(':resources:images/tiles/signExit.png', env.goal)
         self.player = self.create_sprite(':resources:images/enemies/mouse.png', agent.position)
 
@@ -160,7 +185,7 @@ class MazeWindow(arcade.Window):
         self.walls.draw()
         self.goal.draw()
         self.player.draw()
-        arcade.draw_text(f'{self.agent.score}', 10, 10, arcade.csscolor.WHITE, 20)
+        arcade.draw_text(f'{self.agent}', 10, 10, arcade.csscolor.WHITE, 20)
 
     def on_update(self, delta_time):
         if self.agent.position != self.env.goal:
@@ -175,25 +200,39 @@ class MazeWindow(arcade.Window):
         elif key == arcade.key.T:
             self.env.maze[(4, 5)] = TILE_WALL
             self.setup()
+        elif key == arcade.key.E:
+            self.agent.shake()
+
 
 if __name__ == "__main__":
     env = Environment(MAZE)
     print(env.start)
+
     agent = Agent(env)
     if os.path.exists(FILE_AGENT):
-        agent.qtable.load(FILE_AGENT)
+        agent.load(FILE_AGENT)
     print(agent)
+
     window = MazeWindow(agent)
     window.setup()
     arcade.run()
-    agent.qtable.save(FILE_AGENT)
+
+    agent.save(FILE_AGENT)
+
+    plt.plot(agent.history)
+    plt.show()
+
     exit(0)
     print(env.goal)
     for i in range(50):
         agent.reset()
         iteration = 1
         while agent.position != env.goal and iteration < 1000:
+            # print(f"#{iteration} {agent.position}")
             action, reward = agent.do()
+            # print(f"{action} -> {agent.position} {reward}$")
             iteration += 1
         print(iteration)
     print(agent.qtable)
+
+

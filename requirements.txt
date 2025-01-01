@@ -3,3 +3,5 @@ ursina
 tk
 numpy
 pygame
+matplotlib
+
