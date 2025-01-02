@@ -11,8 +11,8 @@ screen_width, screen_height = arcade.get_display_size()
 MAP_WIDTH = screen_width // SPRITE_SIZE
 MAP_HEIGHT = screen_height // SPRITE_SIZE
 
-MAP_WIDTH = 20
-MAP_HEIGHT = 20
+#MAP_WIDTH = 20
+#MAP_HEIGHT = 20
 def generate_map(width, height):
     map_data = ["x" * width]
     for _ in range(height - 2):
@@ -23,6 +23,9 @@ def generate_map(width, height):
 REWARD_FOOD = 50
 REWARD_SURVIVAL = 1
 REWARD_BOMB = -300
+
+REWARD_KILL = 1000
+REWARD_DIE = -1000
 
 ACTION_UP = 'U'
 ACTION_DOWN = 'D'
@@ -216,9 +219,9 @@ class ScriptedSnake:
     def __init__(self, start_position):
         self.body = [start_position]
         self.grow = False
-        self.total_reward = 0
 
     def decide_action(self, env):
+
         head = self.body[0]
 
         closest_food = min(
@@ -306,6 +309,8 @@ class SnakeGame(arcade.Window):
         scripted_action = self.scripted_snake.decide_action(self.env)
         scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
         self.scripted_snake.move(scripted_new_head)
+
+        self.check_collision()
 
         self.update_snake_position()
         self.update_scripted_snake_position()
@@ -417,6 +422,7 @@ class SnakeGame(arcade.Window):
                 scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
                 self.scripted_snake.move(scripted_new_head)
                 self.update_scripted_snake_position()
+                self.check_collision()
 
                 self.save_counter += 1
                 if self.save_counter >= 1000:
@@ -503,6 +509,9 @@ class SnakeGame(arcade.Window):
             self.snake.body = [(1, 1)]
             self.snake.grow = False
 
+            self.scripted_snake.body = [(self.env.height - 2, self.env.width - 2)]
+            self.scripted_snake.grow = False
+
             self.wall_sprites = arcade.SpriteList()
             self.food_sprites = arcade.SpriteList()
             self.bomb_sprites = arcade.SpriteList()
@@ -528,6 +537,25 @@ class SnakeGame(arcade.Window):
             plt.ylabel("Score")
             plt.grid()
             plt.show()
+
+    def check_collision(self):
+        snake_head = self.snake.body[0]
+        scripted_snake_head = self.scripted_snake.body[0]
+
+        if snake_head == scripted_snake_head:
+            print("Les deux têtes se sont rencontrées, aucune action prise.")
+            return
+
+        if snake_head in self.scripted_snake.body[1:]:
+            print("Le snake a touché le corps du scripted_snake. Le snake meurt.")
+            self.end_episode()
+            return
+
+        if scripted_snake_head in self.snake.body[1:]:
+            print("Le scripted_snake a touché le corps du snake. Le scripted_snake meurt.")
+            self.end_episode()
+            return
+
 
 if __name__ == "__main__":
     MAP = generate_map(MAP_WIDTH, MAP_HEIGHT)
