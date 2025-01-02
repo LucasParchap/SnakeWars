@@ -11,8 +11,8 @@ screen_width, screen_height = arcade.get_display_size()
 MAP_WIDTH = screen_width // SPRITE_SIZE
 MAP_HEIGHT = screen_height // SPRITE_SIZE
 
-#MAP_WIDTH = 20
-#MAP_HEIGHT = 20
+MAP_WIDTH = 20
+MAP_HEIGHT = 20
 def generate_map(width, height):
     map_data = ["x" * width]
     for _ in range(height - 2):
@@ -212,6 +212,44 @@ class Snake:
             segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
             self.body = self.body[:segments_to_keep]
 
+class ScriptedSnake:
+    def __init__(self, start_position):
+        self.body = [start_position]
+        self.grow = False
+        self.total_reward = 0
+
+    def decide_action(self, env):
+        head = self.body[0]
+
+        closest_food = min(
+            env.food_positions,
+            key=lambda food: abs(food[0] - head[0]) + abs(food[1] - head[1]),
+            default=None
+        )
+
+        safe_actions = []
+        for action, (dx, dy) in MOVES.items():
+            next_position = (head[0] + dx, head[1] + dy)
+
+            if next_position in env.walls or next_position in env.bomb_positions:
+                continue
+            if closest_food and next_position == closest_food:
+                return action
+            safe_actions.append(action)
+
+        return random.choice(safe_actions) if safe_actions else random.choice(ACTIONS)
+
+    def move(self, new_head):
+        if self.grow:
+            self.body = [new_head] + self.body
+            self.grow = False
+        else:
+            self.body = [new_head] + self.body[:-1]
+
+    def reduce_body(self, percentage):
+        if len(self.body) > 1:
+            segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
+            self.body = self.body[:segments_to_keep]
 
 class SnakeGame(arcade.Window):
     def __init__(self, width, height, snake, env, agent):
@@ -230,6 +268,10 @@ class SnakeGame(arcade.Window):
         self.snake_sprites = arcade.SpriteList()
 
         self.snake_head_sprite = arcade.Sprite("assets/snake_head.png", scale=1)
+
+        self.scripted_snake = ScriptedSnake(start_position=(env.height - 2, env.width - 2))
+        self.scripted_snake_sprites = arcade.SpriteList()
+        self.scripted_snake_head_sprite = arcade.Sprite("assets/snake_head.png", scale=1)
 
         self.time_since_last_move = 0
         self.snake_move_interval = 0.001
@@ -261,7 +303,12 @@ class SnakeGame(arcade.Window):
         self.snake.move(new_head)
         self.snake.total_reward += reward
 
+        scripted_action = self.scripted_snake.decide_action(self.env)
+        scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
+        self.scripted_snake.move(scripted_new_head)
+
         self.update_snake_position()
+        self.update_scripted_snake_position()
         self.update_food_positions()
 
     def on_key_press(self, key, modifiers):
@@ -307,13 +354,14 @@ class SnakeGame(arcade.Window):
             self.bomb_sprites.append(sprite)
 
     def on_draw(self):
-
         arcade.start_render()
         self.wall_sprites.draw()
         self.food_sprites.draw()
         self.bomb_sprites.draw()
         self.snake_sprites.draw()
         self.snake_head_sprite.draw()
+        self.scripted_snake_sprites.draw()
+        self.scripted_snake_head_sprite.draw()
 
         arcade.draw_text(f"Score: {self.total_reward}", 10, self.height - 30, arcade.color.WHITE, 20)
 
@@ -365,6 +413,11 @@ class SnakeGame(arcade.Window):
                 self.total_reward += reward
                 self.current_episode_score += reward
 
+                scripted_action = self.scripted_snake.decide_action(self.env)
+                scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
+                self.scripted_snake.move(scripted_new_head)
+                self.update_scripted_snake_position()
+
                 self.save_counter += 1
                 if self.save_counter >= 1000:
                     try:
@@ -403,6 +456,34 @@ class SnakeGame(arcade.Window):
         for i, segment in enumerate(self.snake.body[1:]):
             self.snake_sprites[i].center_x = (segment[1] + 0.5) * SPRITE_SIZE
             self.snake_sprites[i].center_y = (self.env.height - segment[0] - 0.5) * SPRITE_SIZE
+
+    def update_scripted_snake_position(self):
+
+        head_position = self.scripted_snake.body[0]
+        self.scripted_snake_head_sprite.center_x = (head_position[1] + 0.5) * SPRITE_SIZE
+        self.scripted_snake_head_sprite.center_y = (self.env.height - head_position[0] - 0.5) * SPRITE_SIZE
+
+        if len(self.scripted_snake.body) > 1:
+            neck_position = self.scripted_snake.body[1]
+            if head_position[0] < neck_position[0]:
+                self.scripted_snake_head_sprite.angle = 180
+            elif head_position[0] > neck_position[0]:
+                self.scripted_snake_head_sprite.angle = 0
+            elif head_position[1] < neck_position[1]:
+                self.scripted_snake_head_sprite.angle = 270
+            elif head_position[1] > neck_position[1]:
+                self.scripted_snake_head_sprite.angle = 90
+
+        while len(self.scripted_snake_sprites) > len(self.scripted_snake.body):
+            self.scripted_snake_sprites.pop().kill()
+
+        while len(self.scripted_snake_sprites) < len(self.scripted_snake.body):
+            sprite = arcade.Sprite(":resources:images/topdown_tanks/treeGreen_large.png", SPRITE_SIZE / 128)
+            self.scripted_snake_sprites.append(sprite)
+
+        for i, segment in enumerate(self.scripted_snake.body[1:]):
+            self.scripted_snake_sprites[i].center_x = (segment[1] + 0.5) * SPRITE_SIZE
+            self.scripted_snake_sprites[i].center_y = (self.env.height - segment[0] - 0.5) * SPRITE_SIZE
 
     def update_food_positions(self):
         for i, food in enumerate(self.env.food_positions):
