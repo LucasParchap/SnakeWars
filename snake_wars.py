@@ -166,15 +166,23 @@ class Environment:
 
         return radar
 
+    def check_snake_collision(self, snake):
+        # Vérifie si la tête du serpent entre en collision avec le corps d'un autre serpent
+        snake_head = snake.body[0]
+        for segment in snake.body[1:]:
+            if snake_head == segment:
+                return True
+        return False
+
     def move(self, snake, action):
         move = MOVES[action]
         new_head = (snake.body[0][0] + move[0], snake.body[0][1] + move[1])
 
         if new_head[0] < 0 or new_head[0] >= self.height or new_head[1] < 0 or new_head[1] >= self.width:
-            return snake.body[0], 0
+            return new_head, REWARD_DIE
 
         if new_head in self.walls:
-            return snake.body[0], 0
+            return new_head, REWARD_DIE
 
         if new_head in self.bomb_positions:
             snake.reduce_body(0.5)
@@ -182,13 +190,17 @@ class Environment:
 
         reward = REWARD_SURVIVAL
 
+        if self.check_snake_collision(snake):
+            reward += REWARD_KILL
+
         if new_head in self.food_positions:
             self.food_positions.remove(new_head)
             self.food_positions.append(self.place_food(1)[0])
             snake.grow = True
-            reward += REWARD_FOOD
+            return new_head, REWARD_FOOD
 
         return new_head, reward
+
 
 class Snake:
     def __init__(self, start_position, qtable):
