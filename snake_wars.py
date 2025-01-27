@@ -21,7 +21,7 @@ def generate_map(width, height):
     return "\n".join(map_data)
 
 
-REWARD_FOOD = 5
+REWARD_FOOD = 20
 REWARD_SURVIVAL = -1
 REWARD_BOMB = -50
 
@@ -49,7 +49,7 @@ def arg_max(table):
     return max(table, key=table.get)
 
 class QTable:
-    def __init__(self, learning_rate=0.9, discount_factor=0.95, epsilon=0.9):
+    def __init__(self, learning_rate=0.9, discount_factor=0.95, epsilon=1):
         self.table = {}
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
@@ -70,14 +70,17 @@ class QTable:
 
         max_future_q = max(self.table[new_state].values(), default=0)
         self.table[state][action] += self.learning_rate * (reward + self.discount_factor * max_future_q - self.table[state][action])
-        #print(f"État : {state}, Action : {action}, Valeur Q mise à jour : {self.table[state][action]}")
+        print(f"État : {state}, Action : {action}, Valeur Q mise à jour : {self.table[state][action]}")
 
-    def best_action(self, state, epsilon=0.9):
-        if random.random() < epsilon:
-            return random.choice(ACTIONS)
-        if state in self.table and self.table[state]:
-            return arg_max(self.table[state])
-        return random.choice(ACTIONS)
+    def best_action(self, state):
+        if random.random() < self.epsilon:
+            action = random.choice(ACTIONS)
+        else:
+            if state in self.table and self.table[state]:
+                action = arg_max(self.table[state])
+            else:
+                action = random.choice(ACTIONS)
+        return action
 
     def save(self, filename):
         with open(filename, 'wb') as file:
@@ -87,6 +90,69 @@ class QTable:
         with open(filename, 'rb') as file:
             self.table = pickle.load(file)
 
+class Snake:
+    def __init__(self, start_position, qtable):
+        self.body = [start_position]
+        self.grow = False
+        self.qtable = qtable
+        self.total_reward = 0
+
+    def decide_action(self, state):
+        return self.qtable.best_action(state)
+
+    def update_qtable(self, state, action, reward, new_state):
+        self.qtable.set(state, action, reward, new_state)
+
+    def move(self, new_head):
+        if self.grow:
+            self.body = [new_head] + self.body
+            self.grow = False
+        else:
+            self.body = [new_head] + self.body[:-1]
+
+    def reduce_body(self, percentage):
+        if len(self.body) > 1:
+            segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
+            self.body = self.body[:segments_to_keep]
+
+class ScriptedSnake:
+    def __init__(self, start_position):
+        self.body = [start_position]
+        self.grow = False
+
+    def decide_action(self, env):
+
+        head = self.body[0]
+
+        closest_food = min(
+            env.food_positions,
+            key=lambda food: abs(food[0] - head[0]) + abs(food[1] - head[1]),
+            default=None
+        )
+
+        safe_actions = []
+        for action, (dx, dy) in MOVES.items():
+            next_position = (head[0] + dx, head[1] + dy)
+
+            if next_position in env.walls or next_position in env.bomb_positions:
+                continue
+            if closest_food and next_position == closest_food:
+                return action
+            safe_actions.append(action)
+
+        return random.choice(safe_actions) if safe_actions else random.choice(ACTIONS)
+
+    def move(self, new_head):
+        if self.grow:
+            self.body = [new_head] + self.body
+            self.grow = False
+        else:
+            self.body = [new_head] + self.body[:-1]
+
+    def reduce_body(self, percentage):
+        if len(self.body) > 1:
+            segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
+            self.body = self.body[:segments_to_keep]
 
 class Environment:
     def __init__(self, map_text):
@@ -106,33 +172,31 @@ class Environment:
         return walls
 
     def place_food(self, num_food):
-        positions = []
-        empty_spaces = [
-            (row_idx, col_idx)
-            for row_idx, row in enumerate(self.map)
-            for col_idx, cell in enumerate(row)
-            if cell == '.'
-        ]
-        while len(positions) < num_food and empty_spaces:
-            pos = random.choice(empty_spaces)
-            if all(abs(pos[0] - p[0]) + abs(pos[1] - p[1]) > 3 for p in positions):
-                positions.append(pos)
-                empty_spaces.remove(pos)
-        return positions
+        return self.place_items(num_food, exclude=self.walls)
 
     def place_bombs(self, num_bombs):
+        return self.place_items(num_bombs, exclude=self.walls + self.food_positions)
+
+    def place_items(self, num_items, exclude):
         positions = []
         empty_spaces = [
             (row_idx, col_idx)
             for row_idx, row in enumerate(self.map)
             for col_idx, cell in enumerate(row)
-            if cell == '.' and (row_idx, col_idx) not in self.food_positions
+            if cell == '.' and (row_idx, col_idx) not in exclude
         ]
-        while len(positions) < num_bombs and empty_spaces:
+        while len(positions) < num_items and empty_spaces:
             pos = random.choice(empty_spaces)
             positions.append(pos)
             empty_spaces.remove(pos)
         return positions
+
+    def get_game_state(self):
+        return {
+            "walls": self.walls,
+            "food": self.food_positions,
+            "bombs": self.bomb_positions,
+        }
 
     #Affiché le radar à l'écran
     def get_radar(self, head):
@@ -204,89 +268,25 @@ class Environment:
         new_head = (snake.body[0][0] + move[0], snake.body[0][1] + move[1])
 
         if new_head[0] < 0 or new_head[0] >= self.height or new_head[1] < 0 or new_head[1] >= self.width:
-            return snake.body[0], 0
+            return snake.body[0], REWARD_SURVIVAL
 
         if new_head in self.walls:
-            return snake.body[0], 0
+            return snake.body[0], REWARD_SURVIVAL
 
         if new_head in self.bomb_positions:
             snake.reduce_body(0.5)
             return new_head, REWARD_BOMB
 
-        reward = REWARD_SURVIVAL
-
         if new_head in self.food_positions:
             self.food_positions.remove(new_head)
             self.food_positions.append(self.place_food(1)[0])
             snake.grow = True
-            reward += REWARD_FOOD
+            print("ça passe sur une food là")
+            return new_head, REWARD_FOOD
+
+        reward = REWARD_SURVIVAL
 
         return new_head, reward
-
-class Snake:
-    def __init__(self, start_position, qtable):
-        self.body = [start_position]
-        self.grow = False
-        self.qtable = qtable
-        self.total_reward = 0
-
-    def decide_action(self, state, epsilon=0.1):
-        return self.qtable.best_action(state)
-
-    def update_qtable(self, state, action, reward, new_state):
-        self.qtable.set(state, action, reward, new_state)
-
-    def move(self, new_head):
-        if self.grow:
-            self.body = [new_head] + self.body
-            self.grow = False
-        else:
-            self.body = [new_head] + self.body[:-1]
-
-    def reduce_body(self, percentage):
-        if len(self.body) > 1:
-            segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
-            self.body = self.body[:segments_to_keep]
-
-class ScriptedSnake:
-    def __init__(self, start_position):
-        self.body = [start_position]
-        self.grow = False
-
-    def decide_action(self, env):
-
-        head = self.body[0]
-
-        closest_food = min(
-            env.food_positions,
-            key=lambda food: abs(food[0] - head[0]) + abs(food[1] - head[1]),
-            default=None
-        )
-
-        safe_actions = []
-        for action, (dx, dy) in MOVES.items():
-            next_position = (head[0] + dx, head[1] + dy)
-
-            if next_position in env.walls or next_position in env.bomb_positions:
-                continue
-            if closest_food and next_position == closest_food:
-                return action
-            safe_actions.append(action)
-
-        return random.choice(safe_actions) if safe_actions else random.choice(ACTIONS)
-
-    def move(self, new_head):
-        if self.grow:
-            self.body = [new_head] + self.body
-            self.grow = False
-        else:
-            self.body = [new_head] + self.body[:-1]
-
-    def reduce_body(self, percentage):
-        if len(self.body) > 1:
-            segments_to_keep = max(1, int(len(self.body) * (1 - percentage)))
-            self.body = self.body[:segments_to_keep]
-
 class SnakeGame(arcade.Window):
     def __init__(self, width, height, snake, env, agent):
         super().__init__(width, height, "Snake Game", fullscreen=True)
@@ -310,7 +310,7 @@ class SnakeGame(arcade.Window):
         self.scripted_snake_head_sprite = arcade.Sprite("assets/snake_head_brown.png", scale=1)
 
         self.time_since_last_move = 0
-        self.snake_move_interval = 0.001
+        self.snake_move_interval = 0.1
         self.snake_direction = ACTION_RIGHT
         self.pending_direction = self.snake_direction
 
@@ -320,39 +320,74 @@ class SnakeGame(arcade.Window):
     def do(self):
         head_position = self.snake.body[0]
         radar = self.env.get_radar(head_position)
-        immediate_neighbors = self.env.get_immediate_neighbors(head_position)
+        proximity_radar = self.env.get_immediate_neighbors(head_position)
 
         state = (
             head_position,
             tuple(radar.values()),
-            tuple(immediate_neighbors.values())
+            tuple(proximity_radar.values()),
         )
 
+        if self.manual_control:
+            self.snake_direction = self.pending_direction
+        else:
+            possible_actions = [
+                action for action in ACTIONS
+                if self.env.move(self.snake, action)[0] != head_position
+            ]
+            if possible_actions:
+                self.snake_direction = self.agent.best_action(state)
+            else:
+                self.snake_direction = random.choice(ACTIONS)
 
-        action = self.snake.decide_action(state)
-        new_head, reward = self.env.move(self.snake, action)
+        new_head, reward = self.env.move(self.snake, self.snake_direction)
 
         new_radar = self.env.get_radar(new_head)
-        immediate_neighbors = self.env.get_immediate_neighbors(new_head)
+        new_proximity_radar = self.env.get_immediate_neighbors(head_position)
+
         new_state = (
-            new_head,
+            head_position,
             tuple(new_radar.values()),
-            tuple(immediate_neighbors.values())
+            tuple(new_proximity_radar.values()),
         )
 
-        self.snake.update_qtable(state, action, reward, new_state)
+        self.agent.set(state, self.snake_direction, reward, new_state)
+
         self.snake.move(new_head)
-        self.snake.total_reward += reward
+        self.update_snake_position()
+
+        self.update_food_positions()
+
+        self.total_reward += reward
+        self.current_episode_score += reward
 
         scripted_action = self.scripted_snake.decide_action(self.env)
         scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
         self.scripted_snake.move(scripted_new_head)
-
+        self.update_scripted_snake_position()
         self.check_collision()
 
-        self.update_snake_position()
-        self.update_scripted_snake_position()
-        self.update_food_positions()
+        self.save_counter += 1
+        if self.save_counter >= 1000:
+            try:
+                self.agent.save(FILE_AGENT)
+                print("QTable sauvegardée après 1000 coups.")
+            except Exception as e:
+                print(f"Erreur lors de la sauvegarde de la QTable : {e}")
+            self.end_episode()
+            self.save_counter = 0
+
+    def on_update(self, delta_time):
+        self.time_since_last_move += delta_time
+
+        if self.time_since_last_move >= self.snake_move_interval:
+            self.time_since_last_move = 0
+
+            try:
+                self.do()
+            except Exception as e:
+                print(f"Erreur dans on_update : {e}")
+                raise
 
     def on_key_press(self, key, modifiers):
         if key == arcade.key.F:
@@ -374,27 +409,22 @@ class SnakeGame(arcade.Window):
             elif key == arcade.key.D:
                 self.pending_direction = ACTION_RIGHT
 
+    def create_sprites(self, positions, resource):
+        sprite_list = arcade.SpriteList()
+        for position in positions:
+            sprite = arcade.Sprite(resource, SPRITE_SIZE / 128)
+            sprite.center_x = position[1] * SPRITE_SIZE + SPRITE_SIZE // 2
+            sprite.center_y = (self.env.height - position[0] - 1) * SPRITE_SIZE + SPRITE_SIZE // 2
+            sprite_list.append(sprite)
+        return sprite_list
+
     def setup(self):
-        self.wall_sprites = arcade.SpriteList()
-        for wall in self.env.walls:
-            sprite = arcade.Sprite(":resources:images/tiles/brickGrey.png", SPRITE_SIZE / 128)
-            sprite.center_x = wall[1] * SPRITE_SIZE + SPRITE_SIZE // 2
-            sprite.center_y = (self.env.height - wall[0] - 1) * SPRITE_SIZE + SPRITE_SIZE // 2
-            self.wall_sprites.append(sprite)
+        game_state = self.env.get_game_state()
 
-        self.food_sprites = arcade.SpriteList()
-        for food in self.env.food_positions:
-            sprite = arcade.Sprite(":resources:images/items/star.png", SPRITE_SIZE / 128)
-            sprite.center_x = food[1] * SPRITE_SIZE + SPRITE_SIZE // 2
-            sprite.center_y = (self.env.height - food[0] - 1) * SPRITE_SIZE + SPRITE_SIZE // 2
-            self.food_sprites.append(sprite)
-
-        self.bomb_sprites = arcade.SpriteList()
-        for bomb in self.env.bomb_positions:
-            sprite = arcade.Sprite(":resources:images/tiles/bomb.png", SPRITE_SIZE / 128)
-            sprite.center_x = bomb[1] * SPRITE_SIZE + SPRITE_SIZE // 2
-            sprite.center_y = (self.env.height - bomb[0] - 1) * SPRITE_SIZE + SPRITE_SIZE // 2
-            self.bomb_sprites.append(sprite)
+        # Création des sprites pour chaque élément du jeu
+        self.wall_sprites = self.create_sprites(game_state["walls"], ":resources:images/tiles/brickGrey.png")
+        self.food_sprites = self.create_sprites(game_state["food"], ":resources:images/items/star.png")
+        self.bomb_sprites = self.create_sprites(game_state["bombs"], ":resources:images/tiles/bomb.png")
 
     def on_draw(self):
         arcade.start_render()
@@ -408,69 +438,6 @@ class SnakeGame(arcade.Window):
 
         arcade.draw_text(f"Score: {self.total_reward}", 10, self.height - 30, arcade.color.WHITE, 20)
 
-    def on_update(self, delta_time):
-        self.time_since_last_move += delta_time
-
-        if self.time_since_last_move >= self.snake_move_interval:
-            self.time_since_last_move = 0
-
-            try:
-                head_position = self.snake.body[0]
-                radar = self.env.get_radar(head_position)
-
-                state = (
-                    head_position,
-                    tuple(radar.values()),
-                )
-
-                if self.manual_control:
-                    self.snake_direction = self.pending_direction
-                else:
-                    possible_actions = [
-                        action for action in ACTIONS
-                        if self.env.move(self.snake, action)[0] != head_position
-                    ]
-                    if possible_actions:
-                        self.snake_direction = self.agent.best_action(state)
-                    else:
-                        self.snake_direction = random.choice(ACTIONS)
-
-                new_head, reward = self.env.move(self.snake, self.snake_direction)
-
-                new_radar = self.env.get_radar(new_head)
-                new_state = (
-                    head_position,
-                    tuple(new_radar.values()),
-                )
-
-                self.agent.set(state, self.snake_direction, reward, new_state)
-
-                self.snake.move(new_head)
-                self.update_snake_position()
-                self.update_food_positions()
-
-                self.total_reward += reward
-                self.current_episode_score += reward
-
-                scripted_action = self.scripted_snake.decide_action(self.env)
-                scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
-                self.scripted_snake.move(scripted_new_head)
-                self.update_scripted_snake_position()
-                self.check_collision()
-
-                self.save_counter += 1
-                if self.save_counter >= 1000:
-                    try:
-                        self.agent.save(FILE_AGENT)
-                        print("QTable sauvegardée après 1000 coups.")
-                    except Exception as e:
-                        print(f"Erreur lors de la sauvegarde de la QTable : {e}")
-                    self.end_episode()
-                    self.save_counter = 0
-
-            except Exception as e:
-                print(f"Erreur dans on_update : {e}")
-                raise
 
     def update_snake_position(self):
         head_position = self.snake.body[0]
@@ -498,7 +465,6 @@ class SnakeGame(arcade.Window):
             self.snake_sprites[i].center_y = (self.env.height - segment[0] - 0.5) * SPRITE_SIZE
 
     def update_scripted_snake_position(self):
-
         head_position = self.scripted_snake.body[0]
         self.scripted_snake_head_sprite.center_x = (head_position[1] + 0.5) * SPRITE_SIZE
         self.scripted_snake_head_sprite.center_y = (self.env.height - head_position[0] - 0.5) * SPRITE_SIZE
@@ -532,13 +498,9 @@ class SnakeGame(arcade.Window):
 
     def end_episode(self):
         try:
-            print(f"Début de end_episode. Score actuel : {self.current_episode_score}")
-
+            print(f"Fin de l'épisode. Score actuel : {self.current_episode_score}")
             self.episode_history.append(self.current_episode_score)
             self.episode_history = self.episode_history[-100:]
-            print(f"Score ajouté à l'historique. Historique actuel : {self.episode_history}")
-
-
             self.current_episode_score = 0
             self.total_reward = 0
 
@@ -549,23 +511,15 @@ class SnakeGame(arcade.Window):
             self.scripted_snake.body = [(self.env.height - 2, self.env.width - 2)]
             self.scripted_snake.grow = False
 
-            self.wall_sprites = arcade.SpriteList()
-            self.food_sprites = arcade.SpriteList()
-            self.bomb_sprites = arcade.SpriteList()
-            self.snake_sprites = arcade.SpriteList()
-
             self.env = Environment(generate_map(MAP_WIDTH, MAP_HEIGHT))
-            print("Nouvelle carte générée et sprites réinitialisés.")
-
+            qtable.update_epsilon()
+            print('Ceci est l\'epsilon', qtable.epsilon)
             self.setup()
-            print(f"Setup terminé. Historique des scores : {self.episode_history}")
-
-            #self.agent.update_epsilon()
-            print(f"Valeur actuelle de epsilon : {self.agent.epsilon}")
-
+            print("Nouvelle carte générée et sprites réinitialisés.")
         except Exception as e:
             print(f"Erreur dans end_episode : {e}")
             raise
+
     def plot_episode_history(self):
         if self.episode_history:
             plt.plot(self.episode_history)
