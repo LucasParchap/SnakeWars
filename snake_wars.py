@@ -49,7 +49,7 @@ def arg_max(table):
     return max(table, key=table.get)
 
 class QTable:
-    def __init__(self, learning_rate=0.9, discount_factor=0.95, epsilon=1):
+    def __init__(self, learning_rate=0.9, discount_factor=0.9, epsilon=1):
         self.table = {}
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
@@ -74,7 +74,7 @@ class QTable:
 
     def best_action(self, state):
         if random.random() < self.epsilon:
-            action = random.choice(ACTIONS)
+            return random.choice(ACTIONS)
         else:
             if state in self.table and self.table[state]:
                 action = arg_max(self.table[state])
@@ -281,7 +281,6 @@ class Environment:
             self.food_positions.remove(new_head)
             self.food_positions.append(self.place_food(1)[0])
             snake.grow = True
-            print("ça passe sur une food là")
             return new_head, REWARD_FOOD
 
         reward = REWARD_SURVIVAL
@@ -310,7 +309,7 @@ class SnakeGame(arcade.Window):
         self.scripted_snake_head_sprite = arcade.Sprite("assets/snake_head_brown.png", scale=1)
 
         self.time_since_last_move = 0
-        self.snake_move_interval = 0.1
+        self.snake_move_interval = 0.001
         self.snake_direction = ACTION_RIGHT
         self.pending_direction = self.snake_direction
 
@@ -331,26 +330,17 @@ class SnakeGame(arcade.Window):
         if self.manual_control:
             self.snake_direction = self.pending_direction
         else:
-            possible_actions = [
-                action for action in ACTIONS
-                if self.env.move(self.snake, action)[0] != head_position
-            ]
-            if possible_actions:
-                self.snake_direction = self.agent.best_action(state)
-            else:
-                self.snake_direction = random.choice(ACTIONS)
+            self.snake_direction = self.agent.best_action(state)
 
         new_head, reward = self.env.move(self.snake, self.snake_direction)
-
         new_radar = self.env.get_radar(new_head)
         new_proximity_radar = self.env.get_immediate_neighbors(head_position)
 
         new_state = (
-            head_position,
+            new_head,
             tuple(new_radar.values()),
             tuple(new_proximity_radar.values()),
         )
-
         self.agent.set(state, self.snake_direction, reward, new_state)
 
         self.snake.move(new_head)
@@ -556,5 +546,6 @@ if __name__ == "__main__":
     snake = Snake(start_position=(1, 1), qtable=qtable)
 
     game = SnakeGame(SPRITE_SIZE * MAP_WIDTH, SPRITE_SIZE * MAP_HEIGHT, snake, env, qtable)
+
     game.setup()
     arcade.run()
