@@ -21,9 +21,9 @@ def generate_map(width, height):
     return "\n".join(map_data)
 
 
-REWARD_FOOD = 20
+REWARD_FOOD = 30
 REWARD_SURVIVAL = -1
-REWARD_BOMB = -50
+REWARD_BOMB = -30
 
 REWARD_KILL = 1000
 REWARD_DIE = -1000
@@ -304,9 +304,9 @@ class SnakeGame(arcade.Window):
 
         self.snake_head_sprite = arcade.Sprite("assets/snake_head.png", scale=1)
 
-        self.scripted_snake = ScriptedSnake(start_position=(env.height - 2, env.width - 2))
-        self.scripted_snake_sprites = arcade.SpriteList()
-        self.scripted_snake_head_sprite = arcade.Sprite("assets/snake_head_brown.png", scale=1)
+        #self.scripted_snake = ScriptedSnake(start_position=(env.height - 2, env.width - 2))
+        #self.scripted_snake_sprites = arcade.SpriteList()
+        #self.scripted_snake_head_sprite = arcade.Sprite("assets/snake_head_brown.png", scale=1)
 
         self.time_since_last_move = 0
         self.snake_move_interval = 0.001
@@ -351,11 +351,11 @@ class SnakeGame(arcade.Window):
         self.total_reward += reward
         self.current_episode_score += reward
 
-        scripted_action = self.scripted_snake.decide_action(self.env)
-        scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
-        self.scripted_snake.move(scripted_new_head)
-        self.update_scripted_snake_position()
-        self.check_collision()
+        #scripted_action = self.scripted_snake.decide_action(self.env)
+        #scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
+        #self.scripted_snake.move(scripted_new_head)
+        #self.update_scripted_snake_position()
+        #self.check_collision()
 
         self.save_counter += 1
         if self.save_counter >= 1000:
@@ -423,8 +423,8 @@ class SnakeGame(arcade.Window):
         self.bomb_sprites.draw()
         self.snake_sprites.draw()
         self.snake_head_sprite.draw()
-        self.scripted_snake_sprites.draw()
-        self.scripted_snake_head_sprite.draw()
+        #self.scripted_snake_sprites.draw()
+        #self.scripted_snake_head_sprite.draw()
 
         arcade.draw_text(f"Score: {self.total_reward}", 10, self.height - 30, arcade.color.WHITE, 20)
 
@@ -498,8 +498,8 @@ class SnakeGame(arcade.Window):
             self.snake.body = [(1, 1)]
             self.snake.grow = False
 
-            self.scripted_snake.body = [(self.env.height - 2, self.env.width - 2)]
-            self.scripted_snake.grow = False
+            #self.scripted_snake.body = [(self.env.height - 2, self.env.width - 2)]
+            #self.scripted_snake.grow = False
 
             self.env = Environment(generate_map(MAP_WIDTH, MAP_HEIGHT))
             qtable.update_epsilon()
