@@ -1,4 +1,3 @@
-arcade
 ursina
 tk
 numpy
