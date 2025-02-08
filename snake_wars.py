@@ -21,9 +21,9 @@ def generate_map(width, height):
     return "\n".join(map_data)
 
 
-REWARD_FOOD = 30
+REWARD_FOOD = 100
 REWARD_SURVIVAL = -1
-REWARD_BOMB = -30
+REWARD_BOMB = -100
 
 REWARD_KILL = 1000
 REWARD_DIE = -1000
@@ -49,7 +49,7 @@ def arg_max(table):
     return max(table, key=table.get)
 
 class QTable:
-    def __init__(self, learning_rate=0.9, discount_factor=0.9, epsilon=1):
+    def __init__(self, learning_rate=0.9, discount_factor=0.95, epsilon=0.5):
         self.table = {}
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
@@ -70,7 +70,7 @@ class QTable:
 
         max_future_q = max(self.table[new_state].values(), default=0)
         self.table[state][action] += self.learning_rate * (reward + self.discount_factor * max_future_q - self.table[state][action])
-        print(f"État : {state}, Action : {action}, Valeur Q mise à jour : {self.table[state][action]}")
+        #print(f"État : {state}, Action : {action}, Valeur Q mise à jour : {self.table[state][action]}")
 
     def best_action(self, state):
         if random.random() < self.epsilon:
@@ -197,7 +197,45 @@ class Environment:
             "food": self.food_positions,
             "bombs": self.bomb_positions,
         }
+    '''
+    def get_extended_radar(self, head, scripted_positions):
+        directions = {
+            "UP": (-1, 0), "DOWN": (1, 0), "LEFT": (0, -1), "RIGHT": (0, 1),
+            "UP_LEFT": (-1, -1), "UP_RIGHT": (-1, 1), "DOWN_LEFT": (1, -1), "DOWN_RIGHT": (1, 1),
+        }
+        radar = {}
 
+        # Set pour vérification rapide
+        scripted_positions_set = set(scripted_positions)
+
+        for direction, (dx, dy) in directions.items():
+            x, y = head
+            radar[direction] = []
+            for step in range(1, 6):
+                x += dx
+                y += dy
+                position = (x, y)
+                if position in scripted_positions_set:
+                    radar[direction].append("SNAKE")
+                    break
+                elif position in self.walls:
+                    radar[direction].append("WALL")
+                    break
+                elif position in self.food_positions:
+                    radar[direction].append("FOOD")
+                    break
+                elif position in self.bomb_positions:
+                    radar[direction].append("BOMB")
+                    break
+                elif x < 0 or x >= self.height or y < 0 or y >= self.width:
+                    radar[direction].append("WALL")
+                    break
+                else:
+                    radar[direction].append("EMPTY")
+
+        return {dir: signals[0] if signals else "EMPTY" for dir, signals in radar.items()}
+
+    '''
     #Affiché le radar à l'écran
     def get_radar(self, head):
         directions = {
@@ -208,32 +246,25 @@ class Environment:
         }
 
         radar = {}
-        for action, (row_step, col_step) in directions.items():
+        for action, (dx, dy) in directions.items():
             x, y = head
-            distance = 0
-
-            while True:
-                x += row_step
-                y += col_step
-                distance += 1
-
-                if x < 0 or x >= self.height or y < 0 or y >= self.width:
-                    radar[action] = ('WALL', distance)
+            for _ in range(3): 
+                x += dx
+                y += dy
+                if x < 0 or x >= self.height or y < 0 or y >= self.width or (x, y) in self.walls:
+                    radar[action] = 'WALL'
                     break
-                if (x, y) in self.walls:
-                    radar[action] = ('WALL', distance)
+                elif (x, y) in self.food_positions:
+                    radar[action] = 'FOOD'
                     break
-                if (x, y) in self.food_positions:
-                    radar[action] = ('FOOD', distance)
+                elif (x, y) in self.bomb_positions:
+                    radar[action] = 'BOMB'
                     break
-                if (x, y) in self.bomb_positions:
-                    radar[action] = ('BOMB', distance)
-                    break
-            else:
-                radar[action] = ('EMPTY', distance)
-
+                else:
+                    radar[action] = 'EMPTY'
+        print(radar)
         return radar
-
+    '''
     def get_immediate_neighbors(self, head):
         neighbors = {}
         directions = {
@@ -250,7 +281,7 @@ class Environment:
         for direction, (dx, dy) in directions.items():
             x, y = head[0] + dx, head[1] + dy
 
-            if (x < 0 or x >= self.height or y < 0 or y >= self.width):
+            if x < 0 or x >= self.height or y < 0 or y >= self.width:
                 neighbors[direction] = "WALL"
             elif (x, y) in self.walls:
                 neighbors[direction] = "WALL"
@@ -262,16 +293,16 @@ class Environment:
                 neighbors[direction] = "EMPTY"
 
         return neighbors
-
+    '''
     def move(self, snake, action):
         move = MOVES[action]
         new_head = (snake.body[0][0] + move[0], snake.body[0][1] + move[1])
 
         if new_head[0] < 0 or new_head[0] >= self.height or new_head[1] < 0 or new_head[1] >= self.width:
-            return snake.body[0], REWARD_SURVIVAL
+            return snake.body[0], 0
 
         if new_head in self.walls:
-            return snake.body[0], REWARD_SURVIVAL
+            return snake.body[0], 0
 
         if new_head in self.bomb_positions:
             snake.reduce_body(0.5)
@@ -283,12 +314,12 @@ class Environment:
             snake.grow = True
             return new_head, REWARD_FOOD
 
-        reward = REWARD_SURVIVAL
-
-        return new_head, reward
+        return new_head, REWARD_SURVIVAL
 class SnakeGame(arcade.Window):
     def __init__(self, width, height, snake, env, agent):
-        super().__init__(width, height, "Snake Game", fullscreen=True)
+        calculated_width = MAP_WIDTH * SPRITE_SIZE
+        calculated_height = MAP_HEIGHT * SPRITE_SIZE + 70
+        super().__init__(calculated_width, calculated_height, "Snake Game", fullscreen=False)
         self.env = env
         self.snake = snake
         self.agent = agent
@@ -297,6 +328,7 @@ class SnakeGame(arcade.Window):
         self.total_reward = 0
         self.episode_history = []
         self.current_episode_score = 0
+        self.turn_count = 0
 
         self.wall_sprites = None
         self.food_sprites = None
@@ -304,9 +336,9 @@ class SnakeGame(arcade.Window):
 
         self.snake_head_sprite = arcade.Sprite("assets/snake_head.png", scale=1)
 
-        #self.scripted_snake = ScriptedSnake(start_position=(env.height - 2, env.width - 2))
-        #self.scripted_snake_sprites = arcade.SpriteList()
-        #self.scripted_snake_head_sprite = arcade.Sprite("assets/snake_head_brown.png", scale=1)
+        self.scripted_snake = ScriptedSnake(start_position=(env.height - 2, env.width - 2))
+        self.scripted_snake_sprites = arcade.SpriteList()
+        self.scripted_snake_head_sprite = arcade.Sprite("assets/snake_head_brown.png", scale=1)
 
         self.time_since_last_move = 0
         self.snake_move_interval = 0.001
@@ -318,13 +350,12 @@ class SnakeGame(arcade.Window):
 
     def do(self):
         head_position = self.snake.body[0]
+        #scripted_positions = self.scripted_snake.body
         radar = self.env.get_radar(head_position)
-        proximity_radar = self.env.get_immediate_neighbors(head_position)
 
         state = (
             head_position,
             tuple(radar.values()),
-            tuple(proximity_radar.values()),
         )
 
         if self.manual_control:
@@ -333,13 +364,17 @@ class SnakeGame(arcade.Window):
             self.snake_direction = self.agent.best_action(state)
 
         new_head, reward = self.env.move(self.snake, self.snake_direction)
+        #scripted_positions = self.scripted_snake.body
         new_radar = self.env.get_radar(new_head)
-        new_proximity_radar = self.env.get_immediate_neighbors(head_position)
 
+        collision_reward = self.check_collision()
+        if collision_reward != 0 :
+            reward = collision_reward
+
+        print("Ici ",reward)
         new_state = (
             new_head,
             tuple(new_radar.values()),
-            tuple(new_proximity_radar.values()),
         )
         self.agent.set(state, self.snake_direction, reward, new_state)
 
@@ -351,17 +386,17 @@ class SnakeGame(arcade.Window):
         self.total_reward += reward
         self.current_episode_score += reward
 
-        #scripted_action = self.scripted_snake.decide_action(self.env)
-        #scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
-        #self.scripted_snake.move(scripted_new_head)
-        #self.update_scripted_snake_position()
-        #self.check_collision()
+        scripted_action = self.scripted_snake.decide_action(self.env)
+        scripted_new_head, _ = self.env.move(self.scripted_snake, scripted_action)
+        self.scripted_snake.move(scripted_new_head)
+        self.update_scripted_snake_position()
 
         self.save_counter += 1
-        if self.save_counter >= 1000:
+        if self.save_counter >= 3000:
             try:
                 self.agent.save(FILE_AGENT)
-                print("QTable sauvegardée après 1000 coups.")
+                self.turn_count += 1
+                print("QTable sauvegardée après 3000 coups.")
             except Exception as e:
                 print(f"Erreur lors de la sauvegarde de la QTable : {e}")
             self.end_episode()
@@ -411,7 +446,6 @@ class SnakeGame(arcade.Window):
     def setup(self):
         game_state = self.env.get_game_state()
 
-        # Création des sprites pour chaque élément du jeu
         self.wall_sprites = self.create_sprites(game_state["walls"], ":resources:images/tiles/brickGrey.png")
         self.food_sprites = self.create_sprites(game_state["food"], ":resources:images/items/star.png")
         self.bomb_sprites = self.create_sprites(game_state["bombs"], ":resources:images/tiles/bomb.png")
@@ -423,11 +457,11 @@ class SnakeGame(arcade.Window):
         self.bomb_sprites.draw()
         self.snake_sprites.draw()
         self.snake_head_sprite.draw()
-        #self.scripted_snake_sprites.draw()
-        #self.scripted_snake_head_sprite.draw()
+        self.scripted_snake_sprites.draw()
+        self.scripted_snake_head_sprite.draw()
 
         arcade.draw_text(f"Score: {self.total_reward}", 10, self.height - 30, arcade.color.WHITE, 20)
-
+        arcade.draw_text(f"Turns: {self.turn_count}", 10, self.height - 60, arcade.color.WHITE, 20)
 
     def update_snake_position(self):
         head_position = self.snake.body[0]
@@ -490,7 +524,7 @@ class SnakeGame(arcade.Window):
         try:
             print(f"Fin de l'épisode. Score actuel : {self.current_episode_score}")
             self.episode_history.append(self.current_episode_score)
-            self.episode_history = self.episode_history[-100:]
+            self.episode_history = self.episode_history[-10000:]
             self.current_episode_score = 0
             self.total_reward = 0
 
@@ -498,8 +532,8 @@ class SnakeGame(arcade.Window):
             self.snake.body = [(1, 1)]
             self.snake.grow = False
 
-            #self.scripted_snake.body = [(self.env.height - 2, self.env.width - 2)]
-            #self.scripted_snake.grow = False
+            self.scripted_snake.body = [(self.env.height - 2, self.env.width - 2)]
+            self.scripted_snake.grow = False
 
             self.env = Environment(generate_map(MAP_WIDTH, MAP_HEIGHT))
             qtable.update_epsilon()
@@ -530,12 +564,13 @@ class SnakeGame(arcade.Window):
         if snake_head in self.scripted_snake.body[1:]:
             print("Le snake a touché le corps du scripted_snake. Le snake meurt.")
             self.end_episode()
-            return
+            return REWARD_DIE
 
         if scripted_snake_head in self.snake.body[1:]:
             print("Le scripted_snake a touché le corps du snake. Le scripted_snake meurt.")
             self.end_episode()
-            return
+            return REWARD_KILL
+        return 0
 
 
 if __name__ == "__main__":
